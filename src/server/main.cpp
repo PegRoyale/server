@@ -1,13 +1,12 @@
 #include "logger/logger.hpp"
 #include "global/global.hpp"
-
-ENetAddress address;
-ENetHost* server;
-std::vector<ENetPeer*> peers;
+#include "networking/networking.hpp"
 
 void init()
 {
 	logger::init("server");
+
+	std::printf("---------- PegRoyale Dedicated Server ----------\n\n");
 
 	if (enet_initialize() != 0)
 	{
@@ -16,59 +15,14 @@ void init()
 		return;
 	}
 
-	PRINT_INFO("Enet initalized.");
-
-	address.host = ENET_HOST_ANY;
-	address.port = 23363;
-	PRINT_INFO("Binding to %u:%u", address.host, address.port);
-
-	server = enet_host_create(&address, 16, 2, 0, 0);
-
-	if (!server)
-	{
-		PRINT_ERROR("Server is invalid");
-		PRINT_ERROR("Shutting down (%i)", 0);
-		global::shutdown = true;
-	}
+	networking::init();
 
 	while (!global::shutdown)
 	{
-		ENetEvent evt;
-		while (enet_host_service(server, &evt, 1000) > 0)
-		{
-			switch (evt.type)
-			{
-			case ENET_EVENT_TYPE_CONNECT:
-				PRINT_INFO("Client connected");
-				peers.emplace_back(evt.peer);
-				break;
-
-			case ENET_EVENT_TYPE_DISCONNECT:
-				PRINT_INFO("Client disconnected");
-
-				bool removed = false;
-
-				for (auto i = 0; i < peers.size(); ++i)
-				{
-					if (evt.peer == peers[i])
-					{
-						PRINT_INFO("Removed peer");
-						peers[i] = 0;
-						removed = true;
-						break;
-					}
-				}
-
-				if (!removed)
-				{
-					PRINT_ERROR("Unable to remove peer!");
-				}
-				break;
-			}
-		}
+		networking::update();
 	}
 
-	enet_host_destroy(server);
+	networking::cleanup();
 }
 
 int __cdecl main(int argc, char* argv[])

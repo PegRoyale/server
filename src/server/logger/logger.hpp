@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstdio>
 #include <algorithm>
+#include <regex>
 
 #define PRINT_FILE_CONSOLE(__FMT__, ...)												\
 	if (logger::file)									\
@@ -66,5 +67,44 @@ public:
 		char result[512]{};
 		std::vsprintf(result, fmt, va);
 		return std::string(result);
+	}
+
+	static std::vector<std::string> split(const std::string& s, const std::string& seperator)
+	{
+		std::vector<std::string> output;
+
+		std::string::size_type prev_pos = 0, pos = 0;
+
+		while ((pos = s.find(seperator, pos)) != std::string::npos)
+		{
+			std::string substring(s.substr(prev_pos, pos - prev_pos));
+
+			output.push_back(substring);
+
+			prev_pos = ++pos;
+		}
+
+		output.push_back(s.substr(prev_pos, pos - prev_pos)); // Last word
+
+		return output;
+	}
+
+	static void to_lower(std::string& string)
+	{
+		std::for_each(string.begin(), string.end(), ([](char& c)
+		{
+			c = std::tolower(c);
+		}));
+	}
+
+	static bool ends_with(std::string const& value, std::string const& ending)
+	{
+		if (ending.size() > value.size()) return false;
+		return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
+	}
+
+	static std::string replace(std::string const& in, std::string const& from, std::string const& to)
+	{
+		return std::regex_replace(in, std::regex(from), to);
 	}
 };
