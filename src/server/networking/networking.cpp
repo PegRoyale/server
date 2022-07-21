@@ -126,12 +126,30 @@ void networking::create_room(const std::string& roomid, const std::string& key)
 		return;
 	}
 
-	room_t new_room;
-	new_room.id = roomid;
-	new_room.key = key;
-	networking::rooms.emplace_back(new_room);
+	bool exists = false;
 
-	PRINT_DEBUG("New Room Created: \"%s\"", roomid.c_str());
+	for (auto i = 0; i < networking::rooms.size(); ++i)
+	{
+		if (networking::rooms[i].id == roomid)
+		{
+			exists = true;
+			break;
+		}
+	}
+
+	if (!exists)
+	{
+		room_t new_room;
+		new_room.id = roomid;
+		new_room.key = key;
+		networking::rooms.emplace_back(new_room);
+
+		PRINT_DEBUG("New Room Created: \"%s\"", roomid.c_str());
+	}
+	else
+	{
+		PRINT_ERROR("Room \"%s\" already exists!", roomid.c_str());
+	}
 }
 
 void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
@@ -234,7 +252,6 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 
 				if (roomid != "" && key != "" && name != "")
 				{
-
 					for (auto i = 0; i < networking::rooms.size(); ++i)
 					{
 						if (networking::rooms[i].id == roomid && networking::rooms[i].key == key)
@@ -248,6 +265,10 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 							break;
 						}
 					}
+				}
+				else
+				{
+					PRINT_ERROR("Recieved malformed new player request!");
 				}
 
 			} break;
