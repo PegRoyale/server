@@ -7,12 +7,20 @@ enum class proto_t
 	NEW_USER,
 	READY_UP,
 	START_GAME,
+	GET_USER_LIST,
+	USE_POWEWRUP,
+	DIED,
+	NAME_CHANGE,
+	GET_LEVEL_LIST,
+	ROOMS_FULL,
+	ALREADY_IN_GAME,
 };
 
 struct player_t
 {
 	ENetPeer* peer;
 	std::string name = "N/A";
+	std::string attacking;
 	bool ready = false;
 	bool alive = false;
 };
@@ -34,6 +42,8 @@ public:
 	static void room_broadcast_packet(proto_t proto, int room, const std::string& info = "");
 	static void handle_packet(ENetPacket* packet, ENetPeer* peer);
 	static void remove_user(ENetPeer* peer);
+	static std::string get_username(ENetPeer* peer);
+	static int get_room(ENetPeer* peer);
 	static std::string get_ip(ENetAddress address);
 	static std::vector<room_t> rooms;
 
@@ -42,5 +52,5 @@ public:
 	static int max_rooms;
 
 private:
-	static void create_room(const std::string& roomid, const std::string& key);
+	static bool create_room(const std::string& roomid, const std::string& key);
 };

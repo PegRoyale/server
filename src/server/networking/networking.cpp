@@ -5,13 +5,13 @@
 ENetAddress networking::address;
 ENetHost* networking::server;
 std::vector<room_t> networking::rooms;
-int networking::max_rooms = 3;
+int networking::max_rooms = 1;
 
 void networking::init()
 {
 	networking::address.host = ENET_HOST_ANY;
 	networking::address.port = 23363;
-	PRINT_DEBUG("Binding to %u:%u", networking::address.host, networking::address.port);
+	PRINT_INFO("Binding to %u:%u", networking::address.host, networking::address.port);
 
 	server = enet_host_create(&networking::address, 16, 2, 0, 0);
 
@@ -75,8 +75,24 @@ void networking::update()
 
 					if (delete_room)
 					{
-						PRINT_DEBUG("Deleting room \"%s\" due to lack of players!", networking::rooms[room].id.c_str());
+						PRINT_INFO("Deleting room \"%s\" due to lack of players!", networking::rooms[room].id.c_str());
 						networking::rooms.erase(networking::rooms.begin() + room);
+					}
+					else
+					{
+						std::string player_list;
+
+						for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+						{
+							player_list.append(logger::va("%i=%s", i, networking::rooms[room].players[i].name.c_str()));
+
+							if (i != networking::rooms[room].players.size() - 1)
+							{
+								player_list.append(";");
+							}
+						}
+
+						networking::room_broadcast_packet(proto_t::GET_USER_LIST, room, player_list);
 					}
 				}
 			} break;
@@ -93,16 +109,12 @@ void networking::send_packet(proto_t proto, ENetPeer* peer, const std::string& i
 
 void networking::room_broadcast_packet(proto_t proto, int room, const std::string& info)
 {
-	ENetPacket* packet = enet_packet_create(info.c_str(), info.size() + 1, ENET_PACKET_FLAG_RELIABLE);
-
 	for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
 	{
 		auto peer = networking::rooms[room].players[i].peer;
 
-		networking::send_packet(proto, peer);
+		networking::send_packet(proto, peer, info);
 	}
-
-	PRINT_DEBUG("Broadcasted \"%s\"", info.c_str());
 }
 
 std::string networking::get_ip(ENetAddress address)
@@ -118,12 +130,12 @@ void networking::cleanup()
 	networking::rooms.clear();
 }
 
-void networking::create_room(const std::string& roomid, const std::string& key)
+bool networking::create_room(const std::string& roomid, const std::string& key)
 {
 	if (networking::rooms.size() > networking::max_rooms)
 	{
 		PRINT_ERROR("Room limit reached!");
-		return;
+		return false;
 	}
 
 	bool exists = false;
@@ -144,12 +156,14 @@ void networking::create_room(const std::string& roomid, const std::string& key)
 		new_room.key = key;
 		networking::rooms.emplace_back(new_room);
 
-		PRINT_DEBUG("New Room Created: \"%s\"", roomid.c_str());
+		PRINT_INFO("New Room Created: \"%s\"", roomid.c_str());
 	}
 	else
 	{
-		PRINT_ERROR("Room \"%s\" already exists!", roomid.c_str());
+		PRINT_WARNING("Room \"%s\" already exists!", roomid.c_str());
 	}
+
+	return true;
 }
 
 void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
@@ -177,6 +191,7 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 				bool all_ready = true;
 				int room = -1;
 
+
 				for (auto i = 0; i < networking::rooms.size(); ++i)
 				{
 					for (auto j = 0; j < networking::rooms[i].players.size(); ++j)
@@ -201,10 +216,55 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 
 				if (all_ready)
 				{
-					PRINT_DEBUG("Starting game in room \"%s\"", networking::rooms[room].id.c_str());
+					PRINT_INFO("Starting game in room \"%s\"", networking::rooms[room].id.c_str());
+					int max_levels = 50;
+					std::string player_list;
+					std::string level_list;
+
+					for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+					{
+						player_list.append(logger::va("%i=%s", i, networking::rooms[room].players[i].name.c_str()));
+
+						if (i != networking::rooms[room].players.size() - 1)
+						{
+							player_list.append(";");
+						}
+					}
+
+					static std::random_device rd;
+					static std::mt19937 mt(rd());
+					static std::uniform_int_distribution stage_1(1, 5);
+					static std::uniform_int_distribution stage_2(6, 10);
+					static std::uniform_int_distribution stage_3(11, 15);
+
+					for (auto i = 0; i < max_levels; ++i)
+					{
+						if (i < 3)
+						{
+							level_list.append(logger::va("%i=%i", i, stage_1(mt)));
+						}
+						else if (i >= 3 && i < 10)
+						{
+							level_list.append(logger::va("%i=%i", i, stage_2(mt)));
+						}
+						else if (i >= 10 && i < max_levels)
+						{
+							level_list.append(logger::va("%i=%i", i, stage_3(mt)));
+						}
+
+						if (i != max_levels - 1)
+						{
+							level_list.append(";");
+						}
+					}
+
+					networking::room_broadcast_packet(proto_t::GET_USER_LIST, room, player_list);
+					networking::room_broadcast_packet(proto_t::GET_LEVEL_LIST, room, level_list);
 					networking::room_broadcast_packet(proto_t::START_GAME, room);
+					networking::rooms[room].playing = true;
 				}
 			} break;
+
 
 			case proto_t::CREATE_ROOM:
 			{
@@ -224,7 +284,16 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 					}
 				}
 
-				networking::create_room(roomid, key);
+				if (!networking::create_room(roomid, key))
+				{
+					networking::send_packet(proto_t::ROOMS_FULL, peer);
+					enet_peer_disconnect(peer, 0);
+				}
+			} break;
+
+			case proto_t::DIED:
+			{
+				enet_peer_disconnect(peer, 0);
 			} break;
 
 			case proto_t::NEW_USER:
@@ -252,16 +321,57 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 
 				if (roomid != "" && key != "" && name != "")
 				{
+					if (name.size() > 12)
+					{
+						name = name.substr(0, 12);
+					}
+
 					for (auto i = 0; i < networking::rooms.size(); ++i)
 					{
+						int user_exists = 0;
+
 						if (networking::rooms[i].id == roomid && networking::rooms[i].key == key)
 						{
-							PRINT_DEBUG("Adding new player");
+
+							if (networking::rooms[i].playing)
+							{
+								networking::send_packet(proto_t::ALREADY_IN_GAME, peer);
+								return;
+							}
+
+						retry:
+							for (auto j = 0; j < networking::rooms[i].players.size(); ++j)
+							{
+								if (!user_exists)
+								{
+									if (name == networking::rooms[i].players[j].name)
+									{
+										++user_exists;
+										goto retry;
+									}
+								}
+								else
+								{
+									if ((name + logger::va("-%i", user_exists)) == networking::rooms[i].players[j].name)
+									{
+										++user_exists;
+										goto retry;
+									}
+								}
+							}
+
 							
 							player_t new_player;
 							new_player.peer = peer;
-							new_player.name = name;
+
+							if(!user_exists) new_player.name = name;
+							else if(user_exists) new_player.name = (name + logger::va("-%i", user_exists));
+
+							PRINT_INFO("Adding new player \"%s\"", new_player.name.c_str());
+
+
 							networking::rooms[i].players.emplace_back(new_player);
+							networking::send_packet(proto_t::NAME_CHANGE, peer, logger::va("name=%s", new_player.name.c_str()));
 							break;
 						}
 					}
@@ -272,6 +382,29 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 				}
 
 			} break;
+
+			case proto_t::USE_POWEWRUP:
+			{
+				powerup_t powerup;
+
+				for (auto i = 1; i < split_packet.size(); ++i)
+				{
+					if (split_packet[i].find("powerup") != std::string::npos)
+					{
+						powerup = (powerup_t)std::stoi(logger::split(split_packet[i], "=")[1]);
+						continue;
+					}
+				}
+
+				auto username = networking::get_username(peer);
+				auto room = networking::get_room(peer);
+
+				for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+				{
+					if (networking::rooms[room].players[i].peer == peer) continue;
+					else networking::send_packet(proto_t::USE_POWEWRUP, peer, logger::va("powerup=%i;user=%s;", (int)powerup, username.c_str()));
+				}
+			} break;
 		}
 	}
 }
@@ -279,6 +412,7 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 void networking::remove_user(ENetPeer* peer)
 {
 	bool removed = false;
+	std::string name;
 
 	for (auto i = 0; i < networking::rooms.size(); ++i)
 	{
@@ -286,7 +420,8 @@ void networking::remove_user(ENetPeer* peer)
 		{
 			if (networking::rooms[i].players[j].peer == peer)
 			{
-				networking::rooms[i].players[j] = {};
+				name = networking::rooms[i].players[j].name;
+				networking::rooms[i].players.erase(networking::rooms[i].players.begin() + j);
 				removed = true;
 				break;
 			}
@@ -299,6 +434,39 @@ void networking::remove_user(ENetPeer* peer)
 	}
 	else
 	{
-		PRINT_DEBUG("Player removed");
+		PRINT_DEBUG("Player \"%s\" removed", name.c_str());
 	}
+}
+
+std::string networking::get_username(ENetPeer* peer)
+{
+	for (auto i = 0; i < networking::rooms.size(); ++i)
+	{
+		for (auto j = 0; j < networking::rooms[i].players.size(); ++j)
+		{
+			if (networking::rooms[i].players[j].peer == peer)
+			{
+				return networking::rooms[i].players[j].name;
+			}
+		}
+	}
+
+	return "UNKNOWN";
+}
+
+int networking::get_room(ENetPeer* peer)
+{
+	int room = -1;
+	for (auto i = 0; i < networking::rooms.size(); ++i)
+	{
+		for (auto j = 0; j < networking::rooms[i].players.size(); ++j)
+		{
+			if (networking::rooms[i].players[j].peer == peer)
+			{
+				room = i;
+				break;
+			}
+		}
+	}
+	return room;
 }
