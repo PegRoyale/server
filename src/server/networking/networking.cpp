@@ -386,12 +386,18 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 			case proto_t::USE_POWEWRUP:
 			{
 				powerup_t powerup;
+				std::string attacking;
 
 				for (auto i = 1; i < split_packet.size(); ++i)
 				{
 					if (split_packet[i].find("powerup") != std::string::npos)
 					{
 						powerup = (powerup_t)std::stoi(logger::split(split_packet[i], "=")[1]);
+						continue;
+					}
+					else if (split_packet[i].find("attacking") != std::string::npos)
+					{
+						attacking = logger::split(split_packet[i], "=")[1];
 						continue;
 					}
 				}
@@ -401,9 +407,18 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 
 				for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
 				{
-					if (networking::rooms[room].players[i].peer == peer) continue;
-					else networking::send_packet(proto_t::USE_POWEWRUP, peer, logger::va("powerup=%i;user=%s;", (int)powerup, username.c_str()));
+					if (networking::rooms[room].players[i].name == attacking)
+					{
+						std::string msg = logger::va("powerup=%i;user=%s;", (int)powerup, username.c_str());
+						networking::send_packet(proto_t::USE_POWEWRUP, peer, msg);
+						break;
+					}
 				}
+			} break;
+
+			case proto_t::CHECK_SERVER_ALIVE:
+			{
+				networking::send_packet(proto_t::CHECK_SERVER_ALIVE, peer);
 			} break;
 		}
 	}
@@ -469,4 +484,21 @@ int networking::get_room(ENetPeer* peer)
 		}
 	}
 	return room;
+}
+
+void networking::send_webhook(const std::string& message)
+{
+	//std::string final_message = logger::va("{\"content\":\"%s\"}", message.c_str());
+
+	httplib::Client cli("http://www.discordapp.com");
+
+	cli.set_default_headers({
+		{"Accept", "application/json"}
+	});
+
+	auto res = cli.Post(
+		"/api/webhooks/1001161950056689744/TjefYaDy6rS5VUa3IzblX5XU1ZpMDFWT1WuBO-v3N2k9nB2IyACtRmO5-Ia8jchMMkdx",
+		"{\"content\":\"Test\"}",
+		"application/json"
+	);
 }

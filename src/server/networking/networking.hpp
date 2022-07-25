@@ -14,6 +14,7 @@ enum class proto_t
 	GET_LEVEL_LIST,
 	ROOMS_FULL,
 	ALREADY_IN_GAME,
+	CHECK_SERVER_ALIVE,
 };
 
 struct player_t
@@ -45,8 +46,9 @@ public:
 	static std::string get_username(ENetPeer* peer);
 	static int get_room(ENetPeer* peer);
 	static std::string get_ip(ENetAddress address);
-	static std::vector<room_t> rooms;
+	static void send_webhook(const std::string& message);
 
+	static std::vector<room_t> rooms;
 	static ENetAddress address;
 	static ENetHost* server;
 	static int max_rooms;

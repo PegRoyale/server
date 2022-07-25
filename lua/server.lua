@@ -78,6 +78,7 @@ workspace "server"
 		includedirs {
 			"../src/server/",
 			"../deps/enet-1.3.17/include/",
+			"../deps/cpp-httplib/",
 		}
 
 		files {
