@@ -21,6 +21,13 @@ void networking::init()
 		PRINT_ERROR("Shutting down (%i)", 0);
 		global::shutdown = true;
 	}
+
+	networking::send_webhook("Server has started!");
+
+	std::atexit([]()
+	{
+		networking::send_webhook("Server has shutdown!");
+	});
 }
 
 void networking::update()
@@ -76,6 +83,7 @@ void networking::update()
 					if (delete_room)
 					{
 						PRINT_INFO("Deleting room \"%s\" due to lack of players!", networking::rooms[room].id.c_str());
+						networking::send_webhook(logger::va("Room `%s` has been deleted.", networking::rooms[room].id.c_str()));
 						networking::rooms.erase(networking::rooms.begin() + room);
 					}
 					else
@@ -94,6 +102,10 @@ void networking::update()
 
 						networking::room_broadcast_packet(proto_t::GET_USER_LIST, room, player_list);
 					}
+				}
+				else
+				{
+					networking::check_all_ready(room);
 				}
 			} break;
 		}
@@ -157,6 +169,11 @@ bool networking::create_room(const std::string& roomid, const std::string& key)
 		networking::rooms.emplace_back(new_room);
 
 		PRINT_INFO("New Room Created: \"%s\"", roomid.c_str());
+
+		std::string status = "Private";
+		if (key == "_") status = "Public";
+
+		networking::send_webhook(logger::va("%s room `%s` has been created", status.c_str(), roomid.c_str()));
 	}
 	else
 	{
@@ -191,7 +208,6 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 				bool all_ready = true;
 				int room = -1;
 
-
 				for (auto i = 0; i < networking::rooms.size(); ++i)
 				{
 					for (auto j = 0; j < networking::rooms[i].players.size(); ++j)
@@ -205,64 +221,7 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 					}
 				}
 
-				for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
-				{
-					if (!networking::rooms[room].players[i].ready)
-					{
-						all_ready = false;
-						break;
-					}
-				}
-
-				if (all_ready)
-				{
-					PRINT_INFO("Starting game in room \"%s\"", networking::rooms[room].id.c_str());
-					int max_levels = 50;
-					std::string player_list;
-					std::string level_list;
-
-					for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
-					{
-						player_list.append(logger::va("%i=%s", i, networking::rooms[room].players[i].name.c_str()));
-
-						if (i != networking::rooms[room].players.size() - 1)
-						{
-							player_list.append(";");
-						}
-					}
-
-					static std::random_device rd;
-					static std::mt19937 mt(rd());
-					static std::uniform_int_distribution stage_1(1, 5);
-					static std::uniform_int_distribution stage_2(6, 10);
-					static std::uniform_int_distribution stage_3(11, 15);
-
-					for (auto i = 0; i < max_levels; ++i)
-					{
-						if (i < 3)
-						{
-							level_list.append(logger::va("%i=%i", i, stage_1(mt)));
-						}
-						else if (i >= 3 && i < 10)
-						{
-							level_list.append(logger::va("%i=%i", i, stage_2(mt)));
-						}
-						else if (i >= 10 && i < max_levels)
-						{
-							level_list.append(logger::va("%i=%i", i, stage_3(mt)));
-						}
-
-						if (i != max_levels - 1)
-						{
-							level_list.append(";");
-						}
-					}
-
-					networking::room_broadcast_packet(proto_t::GET_USER_LIST, room, player_list);
-					networking::room_broadcast_packet(proto_t::GET_LEVEL_LIST, room, level_list);
-					networking::room_broadcast_packet(proto_t::START_GAME, room);
-					networking::rooms[room].playing = true;
-				}
+				networking::check_all_ready(room);
 			} break;
 
 
@@ -298,7 +257,8 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 
 			case proto_t::NEW_USER:
 			{
-				std::string roomid, key, name;
+				std::string roomid, name;
+				std::string key = "_";
 
 				for (auto i = 1; i < split_packet.size(); ++i)
 				{
@@ -330,8 +290,13 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 					{
 						int user_exists = 0;
 
-						if (networking::rooms[i].id == roomid && networking::rooms[i].key == key)
+						if (networking::rooms[i].id == roomid)
 						{
+							if (networking::rooms[i].key != key && networking::rooms[i].key != "_")
+							{
+								networking::send_packet(proto_t::INVALID_KEY, peer);
+								break;
+							}
 
 							if (networking::rooms[i].playing)
 							{
@@ -420,6 +385,24 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 			{
 				networking::send_packet(proto_t::CHECK_SERVER_ALIVE, peer);
 			} break;
+
+			case proto_t::GET_USER_LIST:
+			{
+				std::string player_list;
+				int room = networking::get_room(peer);
+
+				for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+				{
+					player_list.append(logger::va("%i=%s", i, networking::rooms[room].players[i].name.c_str()));
+
+					if (i != networking::rooms[room].players.size() - 1)
+					{
+						player_list.append(";");
+					}
+				}
+
+				networking::send_packet(proto_t::GET_USER_LIST, peer, player_list);
+			} break;
 		}
 	}
 }
@@ -486,19 +469,114 @@ int networking::get_room(ENetPeer* peer)
 	return room;
 }
 
+void networking::check_all_ready(int room)
+{
+	if (room == -1)
+	{
+		return;
+	}
+
+	if (networking::rooms.size() <= 0)
+	{
+		return;
+	}
+
+	if (networking::rooms[room].playing)
+	{
+		return;
+	}
+
+	if (networking::rooms[room].players.size() == 0)
+	{
+		return;
+	}
+
+	bool all_ready = true;
+
+	for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+	{
+		if (!networking::rooms[room].players[i].ready)
+		{
+			all_ready = false;
+			break;
+		}
+	}
+
+	if (all_ready)
+	{
+		PRINT_INFO("Starting game in room \"%s\"", networking::rooms[room].id.c_str());
+		int max_levels = 50;
+		std::string player_list;
+		std::string level_list;
+
+		for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+		{
+			player_list.append(logger::va("%i=%s", i, networking::rooms[room].players[i].name.c_str()));
+
+			if (i != networking::rooms[room].players.size() - 1)
+			{
+				player_list.append(";");
+			}
+		}
+
+		static std::random_device rd;
+		static std::mt19937 mt(rd());
+		static std::uniform_int_distribution stage_1(1, 5);
+		static std::uniform_int_distribution stage_2(6, 10);
+		static std::uniform_int_distribution stage_3(11, 15);
+
+		level_list.append("0=0");
+
+		for (auto i = 1; i < max_levels; ++i)
+		{
+			if (i < 3)
+			{
+				level_list.append(logger::va("%i=%i", i, stage_1(mt)));
+			}
+			else if (i >= 3 && i < 10)
+			{
+				level_list.append(logger::va("%i=%i", i, stage_2(mt)));
+			}
+			else if (i >= 10 && i < max_levels)
+			{
+				level_list.append(logger::va("%i=%i", i, stage_3(mt)));
+			}
+
+			if (i != max_levels - 1)
+			{
+				level_list.append(";");
+			}
+		}
+
+		networking::room_broadcast_packet(proto_t::GET_USER_LIST, room, player_list);
+		networking::room_broadcast_packet(proto_t::GET_LEVEL_LIST, room, level_list);
+		networking::room_broadcast_packet(proto_t::START_GAME, room);
+		networking::rooms[room].playing = true;
+
+		networking::send_webhook(
+			logger::va(
+				"Room `%s` has started a match with `%i` players",
+				networking::rooms[room].id.c_str(),
+				networking::rooms[room].players.size()
+			)
+		);
+	}
+}
+
 void networking::send_webhook(const std::string& message)
 {
-	//std::string final_message = logger::va("{\"content\":\"%s\"}", message.c_str());
+	std::string final_message = logger::va("{\"content\": \"%s\"}", message.c_str());
 
-	httplib::Client cli("http://www.discordapp.com");
+	httplib::Client cli("https://discordapp.com");
 
-	cli.set_default_headers({
-		{"Accept", "application/json"}
-	});
-
-	auto res = cli.Post(
-		"/api/webhooks/1001161950056689744/TjefYaDy6rS5VUa3IzblX5XU1ZpMDFWT1WuBO-v3N2k9nB2IyACtRmO5-Ia8jchMMkdx",
-		"{\"content\":\"Test\"}",
-		"application/json"
-	);
+	if (
+		auto res = cli.Post(
+			"/api/webhooks/1001161950056689744/TjefYaDy6rS5VUa3IzblX5XU1ZpMDFWT1WuBO-v3N2k9nB2IyACtRmO5-Ia8jchMMkdx",
+			logger::va("{\"content\": \"%s\"}", message.c_str()).c_str(),
+			"application/json"
+		)
+	)
+	{
+		//PRINT_INFO("%i", (int)res->status);
+	}
 }

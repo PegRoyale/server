@@ -1,3 +1,6 @@
 [submodule "deps/cpp-httplib"]
 	path = deps/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib
+[submodule "deps/openssl"]
+	path = deps/openssl
+	url = https://github.com/clamwin/openssl

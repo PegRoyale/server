@@ -13,4 +13,6 @@ using namespace std::literals;
 
 //Deps
 #include <enet/enet.h>
+
+#define CPPHTTPLIB_OPENSSL_SUPPORT
 #include <httplib.h>

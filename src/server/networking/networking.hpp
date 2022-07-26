@@ -15,6 +15,7 @@ enum class proto_t
 	ROOMS_FULL,
 	ALREADY_IN_GAME,
 	CHECK_SERVER_ALIVE,
+	INVALID_KEY,
 };
 
 struct player_t
@@ -47,6 +48,7 @@ public:
 	static int get_room(ENetPeer* peer);
 	static std::string get_ip(ENetAddress address);
 	static void send_webhook(const std::string& message);
+	static void check_all_ready(int room);
 
 	static std::vector<room_t> rooms;
 	static ENetAddress address;

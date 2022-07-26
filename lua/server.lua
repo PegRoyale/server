@@ -23,6 +23,7 @@ workspace "server"
 
 	syslibdirs {
 		"../deps/enet-1.3.17/",
+		"../deps/openssl/lib/msvc/x86/",
 	}
 
 	platforms {
@@ -73,11 +74,14 @@ workspace "server"
 			"enet",
 			"ws2_32",
 			"winmm",
+			"libssl",
+			"libcrypto",
 		}
 
 		includedirs {
 			"../src/server/",
 			"../deps/enet-1.3.17/include/",
+			"../deps/openssl/include/",
 			"../deps/cpp-httplib/",
 		}
 
