@@ -16,6 +16,7 @@ enum class proto_t
 	ALREADY_IN_GAME,
 	CHECK_SERVER_ALIVE,
 	INVALID_KEY,
+	GRANT_WINNER,
 };
 
 struct player_t
@@ -44,11 +45,13 @@ public:
 	static void room_broadcast_packet(proto_t proto, int room, const std::string& info = "");
 	static void handle_packet(ENetPacket* packet, ENetPeer* peer);
 	static void remove_user(ENetPeer* peer);
-	static std::string get_username(ENetPeer* peer);
+	static std::string get_username(ENetPeer* peer, int room);
+	static int get_user_index(ENetPeer* peer, int room);
 	static int get_room(ENetPeer* peer);
 	static std::string get_ip(ENetAddress address);
 	static void send_webhook(const std::string& message);
 	static void check_all_ready(int room);
+	static int check_winner(int room);
 
 	static std::vector<room_t> rooms;
 	static ENetAddress address;

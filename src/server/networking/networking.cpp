@@ -5,7 +5,7 @@
 ENetAddress networking::address;
 ENetHost* networking::server;
 std::vector<room_t> networking::rooms;
-int networking::max_rooms = 1;
+int networking::max_rooms = 6;
 
 void networking::init()
 {
@@ -105,7 +105,28 @@ void networking::update()
 				}
 				else
 				{
-					networking::check_all_ready(room);
+					if (room == -1)
+					{
+						return;
+					}
+
+					if (networking::rooms[room].playing)
+					{
+						if (auto winner = networking::check_winner(room) != -1)
+						{
+							networking::room_broadcast_packet(
+								proto_t::GRANT_WINNER,
+								room,
+								logger::va("winner=%s;", networking::rooms[room].players[winner].name)
+							);
+
+							networking::rooms[room].playing = false;
+						}
+					}
+					else
+					{
+						networking::check_all_ready(room);
+					}
 				}
 			} break;
 		}
@@ -205,7 +226,6 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 		{
 			case proto_t::READY_UP:
 			{
-				bool all_ready = true;
 				int room = -1;
 
 				for (auto i = 0; i < networking::rooms.size(); ++i)
@@ -252,7 +272,21 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 
 			case proto_t::DIED:
 			{
-				enet_peer_disconnect(peer, 0);
+				auto room = networking::get_room(peer);
+				auto player = networking::get_user_index(peer, room);
+
+				networking::rooms[room].players[player].alive = false;
+
+				if (auto winner = networking::check_winner(room) != -1)
+				{
+					networking::room_broadcast_packet(
+						proto_t::GRANT_WINNER,
+						room,
+						logger::va("winner=%s;", networking::rooms[room].players[winner].name)
+					);
+
+					networking::rooms[room].playing = false;
+				}
 			} break;
 
 			case proto_t::NEW_USER:
@@ -350,6 +384,7 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 
 			case proto_t::USE_POWEWRUP:
 			{
+				PRINT_DEBUG("%s", packet->data);
 				powerup_t powerup;
 				std::string attacking;
 
@@ -367,8 +402,14 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 					}
 				}
 
-				auto username = networking::get_username(peer);
+				if (attacking == "")
+				{
+					PRINT_ERROR("Did not find attacking user!");
+					return;
+				}
+
 				auto room = networking::get_room(peer);
+				auto username = networking::get_username(peer, room);
 
 				for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
 				{
@@ -390,6 +431,12 @@ void networking::handle_packet(ENetPacket* packet, ENetPeer* peer)
 			{
 				std::string player_list;
 				int room = networking::get_room(peer);
+
+				if (room == -1)
+				{
+					PRINT_ERROR("Room is -1");
+					return;
+				}
 
 				for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
 				{
@@ -436,20 +483,30 @@ void networking::remove_user(ENetPeer* peer)
 	}
 }
 
-std::string networking::get_username(ENetPeer* peer)
+std::string networking::get_username(ENetPeer* peer, int room)
 {
-	for (auto i = 0; i < networking::rooms.size(); ++i)
+	for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
 	{
-		for (auto j = 0; j < networking::rooms[i].players.size(); ++j)
+		if (networking::rooms[room].players[i].peer == peer)
 		{
-			if (networking::rooms[i].players[j].peer == peer)
-			{
-				return networking::rooms[i].players[j].name;
-			}
+			return networking::rooms[room].players[i].name;
 		}
 	}
 
 	return "UNKNOWN";
+}
+
+int networking::get_user_index(ENetPeer* peer, int room)
+{
+	for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+	{
+		if (networking::rooms[room].players[i].peer == peer)
+		{
+			return i;
+		}
+	}
+
+	return -1;
 }
 
 int networking::get_room(ENetPeer* peer)
@@ -553,6 +610,11 @@ void networking::check_all_ready(int room)
 		networking::room_broadcast_packet(proto_t::START_GAME, room);
 		networking::rooms[room].playing = true;
 
+		for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+		{
+			networking::rooms[room].players[i].ready = false;
+		}
+
 		networking::send_webhook(
 			logger::va(
 				"Room `%s` has started a match with `%i` players",
@@ -579,4 +641,27 @@ void networking::send_webhook(const std::string& message)
 	{
 		//PRINT_INFO("%i", (int)res->status);
 	}
+}
+
+int networking::check_winner(int room)
+{
+	int winner = -1;
+
+	for (auto i = 0; i < networking::rooms[room].players.size(); ++i)
+	{
+		if (networking::rooms[room].players[i].alive)
+		{
+			if (winner == -1)
+			{
+				winner = i;
+			}
+			else if (winner != -1)
+			{
+				winner = -1;
+				break;
+			}
+		}
+	}
+
+	return winner;
 }
